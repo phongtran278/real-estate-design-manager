@@ -15,45 +15,64 @@ function validateRows(rows){
  if(cols.indexOf('tower')<0||cols.indexOf('unit')<0)throw Error('Missing columns tower / unit in the first row.');
  if(cols.indexOf('floor')<0&&cols.indexOf('floor_range')<0)throw Error('Missing column floor or floor_range.');
 }
-function fetchSheet(url,tab,done){
- var id;try{id=parseGoogleUrl(url);}catch(e){done(e);return;}
- tab=String(tab||'').trim();if(!tab){done(Error('Enter the exact Sheet tab name.'));return;}
- // Google Visualization JSONP works without CEP Node.js and without changing CEP security settings.
- var callbackName='__redmSheetCallback_'+Date.now(),finished=false,script=document.createElement('script');
- var uri='https://docs.google.com/spreadsheets/d/'+encodeURIComponent(id)+'/gviz/tq?headers=1&sheet='+encodeURIComponent(tab)+'&tqx='+encodeURIComponent('out:json;responseHandler:'+callbackName);
- var timer=setTimeout(function(){finish(Error('Google Sheets timed out. Check network access and Sheet sharing permissions.'));},15000);
- function finish(error,rows){if(finished)return;finished=true;clearTimeout(timer);try{delete window[callbackName];}catch(e){window[callbackName]=undefined;}if(script.parentNode)script.parentNode.removeChild(script);done(error,rows);}
- window[callbackName]=function(response){
-  try{
-   if(!response||response.status!=='ok'||!response.table){
-    var errors=response&&response.errors||[];
-    throw Error(errors.length&&errors[0].detailed_message||errors.length&&errors[0].message||'Google returned no table. Check the tab and link permissions.');
-   }
-   var table=response.table,headers=(table.cols||[]).map(function(col){return String(col.label||'').trim().toLowerCase();});
-   if(!headers.length||headers.some(function(x){return !x;}))throw Error('Missing column names. The first row must be headers.');
-   var rows=(table.rows||[]).map(function(row){var obj={};headers.forEach(function(name,i){var cell=row.c&&row.c[i];obj[name]=cell&&cell.v!==null&&typeof cell.v!=='undefined'?String(typeof cell.f==='string'?cell.f:cell.v).trim():'';});return obj;});
-   validateRows(rows);finish(null,rows);
-  }catch(e){finish(e);}
- };
- script.onerror=function(){finish(Error('Google Sheets script request was blocked or unavailable. Check network, sharing permissions and CEP security policy.'));};
- script.src=uri;document.head.appendChild(script);
+function getSheet(url,which,callback){
+ var id;try{id=parseGoogleUrl(url);}catch(e){callback(e);return;}
+ var cb='__redm_cb_'+Date.now()+'_'+Math.floor(Math.random()*9999),script=document.createElement('script'),done=false;
+ var address='https://docs.google.com/spreadsheets/d/'+encodeURIComponent(id)+'/gviz/tq?headers=0&tqx='+encodeURIComponent('out:json;responseHandler:'+cb);
+ if(which&&which.gid!==undefined)address+='&gid='+encodeURIComponent(which.gid);
+ else if(which&&which.tab)address+='&sheet='+encodeURIComponent(which.tab);
+ var timeout=setTimeout(function(){finish(Error('Timed out. Check network and Sheet permissions.'));},15000);
+ function finish(e,t){if(done)return;done=true;clearTimeout(timeout);try{delete window[cb];}catch(x){window[cb]=null;}if(script.parentNode)script.parentNode.removeChild(script);callback(e,t);}
+ window[cb]=function(r){if(!r||r.status!=='ok'||!r.table){var e=r&&r.errors&&r.errors[0];finish(Error(e&&(e.detailed_message||e.message)||'Could not open Sheet. Check access.'));return;}finish(null,r.table);};
+ script.onerror=function(){finish(Error('Google access blocked. Private Sheets need authentication.'));};
+ script.src=address;document.head.appendChild(script);
 }
-function sheetSync(){
- if(syncBusy)return;var url=$('sheetUrl').value.trim(),tab=$('sheetTab').value.trim();syncBusy=true;
- $('connectSheet').disabled=true;$('syncSheet').disabled=true;$('sheetStatus').textContent='Connecting to Google Sheets...';
- fetchSheet(url,tab,function(err,rows){
+function tableRows(t){
+ var cols=t.cols||[],raw=t.rows||[];
+ function values(r){return cols.map(function(_,i){var c=r.c&&r.c[i];return c&&c.v!=null?String(c.f!=null?c.f:c.v).trim():'';});}
+ var headers=cols.map(function(c){return String(c.label||'').trim().toLowerCase();});
+ var named=headers.indexOf('tower')>=0&&headers.indexOf('unit')>=0;
+ if(!named){if(!raw.length)throw Error('Empty sheet.');headers=values(raw[0]).map(function(x){return x.toLowerCase();});raw=raw.slice(1);}
+ if(headers.indexOf('tower')<0||headers.indexOf('unit')<0||(headers.indexOf('floor')<0&&headers.indexOf('floor_range')<0))throw Error('Header row must contain tower, unit and floor/floor_range. Check tab.');
+ var seen={};headers.forEach(function(x){if(x&&seen[x])throw Error('Duplicate header '+x);seen[x]=true;});
+ var rows=raw.map(function(r){var obj={},v=values(r);headers.forEach(function(h,i){if(h)obj[h]=v[i]||'';});return obj;}).filter(function(r){return Object.keys(r).some(function(k){return r[k]!=='';});});
+ validateRows(rows);return rows;
+}
+function urlGid(u){var m=String(u).match(/[?&#]gid=(\d+)/);return m?m[1]:null;}
+var connectedId='';
+function disconnected(){connectedId='';$('sheetOptions').hidden=true;$('syncSheet').disabled=true;clearPreview();}
+$('sheetUrl').oninput=disconnected;
+$('connectSheet').onclick=function(){
+ if(syncBusy)return;var url=$('sheetUrl').value.trim(),gid=urlGid(url);
+ try{parseGoogleUrl(url);}catch(e){$('sheetStatus').textContent=e.message;return;}
+ syncBusy=true;$('connectSheet').disabled=true;$('sheetStatus').textContent='Connecting...';
+ getSheet(url,gid!==null?{gid:gid}:null,function(e){
   syncBusy=false;$('connectSheet').disabled=false;
-  if(err){$('sheetStatus').textContent='Connection failed: '+err.message;status('Google Sheets: '+err.message);$('syncSheet').disabled=!lastSheetUrl;return;}
-  data=rows;clearPreview();if(scan)renderFields();
-  lastSheetUrl=url;lastSheetTab=tab;$('syncSheet').disabled=false;
-  try{localStorage.setItem(sheetConfigKey,JSON.stringify({url:url,tab:tab}));}catch(e){}
-  var message='Connected · '+rows.length+' rows from '+tab+' · read-only';
-  $('sheetStatus').textContent=message;$('dataStatus').textContent=message;
-  status('Synced '+rows.length+' rows. Review mapping and Preview before Apply.');
+  if(e){disconnected();$('sheetStatus').textContent='Connection failed: '+e.message;return;}
+  connectedId=parseGoogleUrl(url);lastSheetUrl=url;$('sheetOptions').hidden=false;
+  $('sheetGid').value=gid||'';$('sheetTab').value='DATA_CARDS';$('syncSheet').disabled=false;
+  $('sheetStatus').textContent='Connected. Select the tab and press Sync Data.';
+  try{localStorage.setItem(sheetConfigKey,JSON.stringify({url:url,tab:'DATA_CARDS'}));}catch(x){}
  });
-}
-$('connectSheet').onclick=sheetSync;$('syncSheet').onclick=sheetSync;
-try{var saved=JSON.parse(localStorage.getItem(sheetConfigKey)||'null');if(saved&&saved.url){$('sheetUrl').value=saved.url;$('sheetTab').value=saved.tab||'DATA_CARDS';$('sheetStatus').textContent='Saved link loaded. Click Connect & Sync.';}}catch(e){}
+};
+$('sheetTab').oninput=function(){$('sheetGid').value='';clearPreview();};
+$('syncSheet').onclick=function(){
+ if(syncBusy||!connectedId)return;
+ var url=$('sheetUrl').value.trim(),tab=$('sheetTab').value.trim(),gid=$('sheetGid').value.trim();
+ if(parseGoogleUrl(url)!==connectedId){disconnected();return;}
+ if(!tab&&!gid){$('sheetStatus').textContent='Enter tab name or gid.';return;}
+ syncBusy=true;$('syncSheet').disabled=true;$('sheetStatus').textContent='Syncing...';
+ getSheet(url,gid?{gid:gid}:{tab:tab},function(e,t){
+  syncBusy=false;$('syncSheet').disabled=false;
+  if(e){$('sheetStatus').textContent='Sync failed: '+e.message;return;}
+  try{var rows=tableRows(t);data=rows;clearPreview();if(scan)renderFields();lastSheetTab=tab;
+  var msg='Synced '+rows.length+' rows · '+(gid?'gid '+gid:tab)+' · read-only';
+  $('sheetStatus').textContent=msg;$('dataStatus').textContent=msg;status('Sheet ready. Scan and Preview before Apply.');
+  try{localStorage.setItem(sheetConfigKey,JSON.stringify({url:url,tab:tab,gid:gid}));}catch(x){}
+  }catch(err){$('sheetStatus').textContent='Sync failed: '+err.message;}
+ });
+};
+try{var saved=JSON.parse(localStorage.getItem(sheetConfigKey)||'null');if(saved&&saved.url){$('sheetUrl').value=saved.url;$('sheetTab').value=saved.tab||'DATA_CARDS';$('sheetStatus').textContent='Saved link loaded. Click Connect.';}}catch(e){}
 
 var embedded=[
  ['TOWER 3','5-19','05','02','2PN ĐẶC BIỆT','120.2','110.6'],
