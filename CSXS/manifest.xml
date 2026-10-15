@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="7.0" ExtensionBundleId="tech.phongtran.realestatedesignmanager" ExtensionBundleVersion="0.3.0" ExtensionBundleName="Real Estate Design Manager">
+ <ExtensionList><Extension Id="tech.phongtran.realestatedesignmanager.panel" Version="0.3.0"/></ExtensionList>
+ <ExecutionEnvironment><HostList><Host Name="ILST" Version="[26.0,99.9]"/></HostList><LocaleList><Locale Code="All"/></LocaleList><RequiredRuntimeList><RequiredRuntime Name="CSXS" Version="9.0"/></RequiredRuntimeList></ExecutionEnvironment>
+ <DispatchInfoList><Extension Id="tech.phongtran.realestatedesignmanager.panel"><DispatchInfo><Resources><MainPath>./panel/index.html</MainPath><CEFCommandLine><Parameter>--enable-nodejs</Parameter></CEFCommandLine></Resources><Lifecycle><AutoVisible>true</AutoVisible></Lifecycle><UI><Type>Panel</Type><Menu>Real Estate Design Manager</Menu><Geometry><Size><Width>440</Width><Height>680</Height></Size><MinSize><Width>340</Width><Height>420</Height></MinSize></Geometry></UI></DispatchInfo></Extension></DispatchInfoList>
+</ExtensionManifest>
