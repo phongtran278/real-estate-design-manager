@@ -17,35 +17,26 @@ function validateRows(rows){
 }
 function fetchSheet(url,tab,done){
  var id;try{id=parseGoogleUrl(url);}catch(e){done(e);return;}
- tab=String(tab||'').trim();
- if(!tab){done(Error('Enter the exact Sheet tab name.'));return;}
- var uri='https://docs.google.com/spreadsheets/d/'+encodeURIComponent(id)+'/gviz/tq?tqx=out%3Acsv&sheet='+encodeURIComponent(tab);
- // The CEP panel uses its Node runtime so browser cross-origin restrictions don't block read-only CSV responses.
- if(typeof require!=='function'){done(Error('CEP Node runtime unavailable. Reopen the panel and check extension configuration.'));return;}
- var https=require('https');var redirects=0;
- function retrieve(target){
-  var request=https.get(target,{headers:{'User-Agent':'RealEstateDesignManager/0.5','Accept':'text/csv,text/plain,*/*'},timeout:15000},function(res){
-   var statusCode=res.statusCode,location=res.headers.location;
-   if(statusCode>=300&&statusCode<400&&location){
-    res.resume();if(++redirects>4){done(Error('Too many redirects. Check Sheet permissions.'));return;}
-    var next=require('url').resolve(target,location);if(!/^https:\/\/(?:docs\.google\.com|accounts\.google\.com)\/?/i.test(next)){done(Error('Unexpected redirect destination.'));return;}
-    if(/accounts\.google\.com/.test(next)){done(Error('This Google Sheet requires Google sign-in. Link-only sync cannot access private Sheets.'));return;}
-    retrieve(next);return;
+ tab=String(tab||'').trim();if(!tab){done(Error('Enter the exact Sheet tab name.'));return;}
+ // Google Visualization JSONP works without CEP Node.js and without changing CEP security settings.
+ var callbackName='__redmSheetCallback_'+Date.now(),finished=false,script=document.createElement('script');
+ var uri='https://docs.google.com/spreadsheets/d/'+encodeURIComponent(id)+'/gviz/tq?headers=1&sheet='+encodeURIComponent(tab)+'&tqx='+encodeURIComponent('out:json;responseHandler:'+callbackName);
+ var timer=setTimeout(function(){finish(Error('Google Sheets timed out. Check network access and Sheet sharing permissions.'));},15000);
+ function finish(error,rows){if(finished)return;finished=true;clearTimeout(timer);try{delete window[callbackName];}catch(e){window[callbackName]=undefined;}if(script.parentNode)script.parentNode.removeChild(script);done(error,rows);}
+ window[callbackName]=function(response){
+  try{
+   if(!response||response.status!=='ok'||!response.table){
+    var errors=response&&response.errors||[];
+    throw Error(errors.length&&errors[0].detailed_message||errors.length&&errors[0].message||'Google returned no table. Check the tab and link permissions.');
    }
-   if(statusCode!==200){res.resume();done(Error('Google Sheets returned HTTP '+statusCode+'. Check tab name and sharing permissions.'));return;}
-   var chunks=[],size=0;
-   res.on('data',function(chunk){size+=chunk.length;if(size>2*1024*1024){request.destroy(Error('Sheet response exceeds 2 MB.'));return;}chunks.push(chunk);});
-   res.on('end',function(){
-    try{var body=Buffer.concat(chunks).toString('utf8');
-     if(/^\s*(?:<!doctype html|<html)/i.test(body))throw Error('Google returned a sign-in or error page. Check sharing permissions.');
-     var rows=parseCSV(body);validateRows(rows);done(null,rows);
-    }catch(e){done(e);}
-   });
-  });
-  request.on('timeout',function(){request.destroy(Error('Google Sheets request timed out.'));});
-  request.on('error',function(e){done(e);});
- }
- retrieve(uri);
+   var table=response.table,headers=(table.cols||[]).map(function(col){return String(col.label||'').trim().toLowerCase();});
+   if(!headers.length||headers.some(function(x){return !x;}))throw Error('Missing column names. The first row must be headers.');
+   var rows=(table.rows||[]).map(function(row){var obj={};headers.forEach(function(name,i){var cell=row.c&&row.c[i];obj[name]=cell&&cell.v!==null&&typeof cell.v!=='undefined'?String(typeof cell.f==='string'?cell.f:cell.v).trim():'';});return obj;});
+   validateRows(rows);finish(null,rows);
+  }catch(e){finish(e);}
+ };
+ script.onerror=function(){finish(Error('Google Sheets script request was blocked or unavailable. Check network, sharing permissions and CEP security policy.'));};
+ script.src=uri;document.head.appendChild(script);
 }
 function sheetSync(){
  if(syncBusy)return;var url=$('sheetUrl').value.trim(),tab=$('sheetTab').value.trim();syncBusy=true;
