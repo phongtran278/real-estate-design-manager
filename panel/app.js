@@ -2,6 +2,68 @@
 var $=function(id){return document.getElementById(id);};
 var data=[],scan=null,plan=null,preview=null;
 $('reload').onclick=function(){location.reload();};
+
+var sheetConfigKey='redm:sheet:v05',lastSheetUrl='',lastSheetTab='DATA_CARDS',syncBusy=false;
+function parseGoogleUrl(value){
+ var m=String(value||'').trim().match(/^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)(?:\/|$)/);
+ if(!m)throw Error('Invalid Google Sheets URL. Paste the full docs.google.com/spreadsheets/d/... link.');
+ return m[1];
+}
+function validateRows(rows){
+ if(!rows.length)throw Error('The tab has no data rows.');
+ var cols=Object.keys(rows[0]);
+ if(cols.indexOf('tower')<0||cols.indexOf('unit')<0)throw Error('Missing columns tower / unit in the first row.');
+ if(cols.indexOf('floor')<0&&cols.indexOf('floor_range')<0)throw Error('Missing column floor or floor_range.');
+}
+function fetchSheet(url,tab,done){
+ var id;try{id=parseGoogleUrl(url);}catch(e){done(e);return;}
+ tab=String(tab||'').trim();
+ if(!tab){done(Error('Enter the exact Sheet tab name.'));return;}
+ var uri='https://docs.google.com/spreadsheets/d/'+encodeURIComponent(id)+'/gviz/tq?tqx=out%3Acsv&sheet='+encodeURIComponent(tab);
+ // The CEP panel uses its Node runtime so browser cross-origin restrictions don't block read-only CSV responses.
+ if(typeof require!=='function'){done(Error('CEP Node runtime unavailable. Reopen the panel and check extension configuration.'));return;}
+ var https=require('https');var redirects=0;
+ function retrieve(target){
+  var request=https.get(target,{headers:{'User-Agent':'RealEstateDesignManager/0.5','Accept':'text/csv,text/plain,*/*'},timeout:15000},function(res){
+   var statusCode=res.statusCode,location=res.headers.location;
+   if(statusCode>=300&&statusCode<400&&location){
+    res.resume();if(++redirects>4){done(Error('Too many redirects. Check Sheet permissions.'));return;}
+    var next=require('url').resolve(target,location);if(!/^https:\/\/(?:docs\.google\.com|accounts\.google\.com)\/?/i.test(next)){done(Error('Unexpected redirect destination.'));return;}
+    if(/accounts\.google\.com/.test(next)){done(Error('This Google Sheet requires Google sign-in. Link-only sync cannot access private Sheets.'));return;}
+    retrieve(next);return;
+   }
+   if(statusCode!==200){res.resume();done(Error('Google Sheets returned HTTP '+statusCode+'. Check tab name and sharing permissions.'));return;}
+   var chunks=[],size=0;
+   res.on('data',function(chunk){size+=chunk.length;if(size>2*1024*1024){request.destroy(Error('Sheet response exceeds 2 MB.'));return;}chunks.push(chunk);});
+   res.on('end',function(){
+    try{var body=Buffer.concat(chunks).toString('utf8');
+     if(/^\s*(?:<!doctype html|<html)/i.test(body))throw Error('Google returned a sign-in or error page. Check sharing permissions.');
+     var rows=parseCSV(body);validateRows(rows);done(null,rows);
+    }catch(e){done(e);}
+   });
+  });
+  request.on('timeout',function(){request.destroy(Error('Google Sheets request timed out.'));});
+  request.on('error',function(e){done(e);});
+ }
+ retrieve(uri);
+}
+function sheetSync(){
+ if(syncBusy)return;var url=$('sheetUrl').value.trim(),tab=$('sheetTab').value.trim();syncBusy=true;
+ $('connectSheet').disabled=true;$('syncSheet').disabled=true;$('sheetStatus').textContent='Connecting to Google Sheets...';
+ fetchSheet(url,tab,function(err,rows){
+  syncBusy=false;$('connectSheet').disabled=false;
+  if(err){$('sheetStatus').textContent='Connection failed: '+err.message;status('Google Sheets: '+err.message);$('syncSheet').disabled=!lastSheetUrl;return;}
+  data=rows;clearPreview();if(scan)renderFields();
+  lastSheetUrl=url;lastSheetTab=tab;$('syncSheet').disabled=false;
+  try{localStorage.setItem(sheetConfigKey,JSON.stringify({url:url,tab:tab}));}catch(e){}
+  var message='Connected · '+rows.length+' rows from '+tab+' · read-only';
+  $('sheetStatus').textContent=message;$('dataStatus').textContent=message;
+  status('Synced '+rows.length+' rows. Review mapping and Preview before Apply.');
+ });
+}
+$('connectSheet').onclick=sheetSync;$('syncSheet').onclick=sheetSync;
+try{var saved=JSON.parse(localStorage.getItem(sheetConfigKey)||'null');if(saved&&saved.url){$('sheetUrl').value=saved.url;$('sheetTab').value=saved.tab||'DATA_CARDS';$('sheetStatus').textContent='Saved link loaded. Click Connect & Sync.';}}catch(e){}
+
 var embedded=[
  ['TOWER 3','5-19','05','02','2PN ĐẶC BIỆT','120.2','110.6'],
  ['TOWER 3','5-19','05','04','3PN','126.1','115.5'],

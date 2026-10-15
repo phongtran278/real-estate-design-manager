@@ -1,4 +1,4 @@
-# Real Estate Design Manager — CEP v0.3
+# Real Estate Design Manager — CEP v0.5
 
 Illustrator 2026 on Windows. Overview: scan existing named card groups, preview CSV-based text changes, and apply selected numeric fields. Keep design layout unchanged.
 
@@ -21,4 +21,4 @@ cd D:\PHONG_LAB\real-estate-design-manager
 
 Click **Reload Panel**. Manifest/extension configuration changes may require reopening Illustrator. JSX host logic is evaluated from disk per action.
 
-**Development build only:** Offline CSV demo, not direct Google Sheets sync. Back up `.ai` before Apply; no guaranteed formatting-perfect rollback. Named groups such as `T3-05-02`, with named Text Objects, are required for Overview.
+**Development build only:** Link-based read-only Google Sheets sync via CSV export; requires a Sheet accessible by link or published. Private Sheets that require sign-in are not supported yet. URL/tab saved locally. CSV/paste-cell demo remains as fallback. Back up `.ai` before Apply; no guaranteed formatting-perfect rollback. Named groups such as `T3-05-02`, with named Text Objects, are required for Overview.
